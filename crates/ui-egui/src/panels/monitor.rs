@@ -16,7 +16,7 @@ use crate::FilmcraftApp;
 use crate::frames::{FrameKey, Target};
 use crate::icons::{self, Icon};
 use crate::panels::monitor_view;
-use crate::state::{DisplayMode, PlaybackRes};
+use crate::state::{DisplayMode, MonitorView, PlaybackRes};
 use crate::theme::Tokens;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -692,6 +692,15 @@ fn mini_timeline(
     }
 }
 
+/// Whether a configured transport control should be drawn. Old layouts show the existing
+/// controls as before; Loop is offered by Button Editor but starts hidden.
+fn transport_button_visible(view: &MonitorView, command: &str) -> bool {
+    if command == "playback.loop" {
+        return view.show_loop_button;
+    }
+    !view.hidden_transport_buttons.iter().any(|hidden| hidden == command)
+}
+
 fn transport(app: &mut FilmcraftApp, ui: &mut egui::Ui, row: Rect, which: Which) {
     let t = app.tokens;
     let src = which == Which::Source;
@@ -703,6 +712,7 @@ fn transport(app: &mut FilmcraftApp, ui: &mut egui::Ui, row: Rect, which: Which)
             (Icon::GoToIn, "src.goIn", tl!("Go to In (Shift+I)")),
             (Icon::StepBack, "src.stepBack", tl!("Step Back 1 Frame (Left)")),
             (if app.source_playback.clock.playing { Icon::Pause } else { Icon::Play }, "source.playback.toggle", tl!("Play-Stop Toggle (Space)")),
+            (Icon::Loop, "playback.loop", tl!("Loop")),
             (Icon::StepFwd, "src.stepFwd", tl!("Step Forward 1 Frame (Right)")),
             (Icon::GoToOut, "src.goOut", tl!("Go to Out (Shift+O)")),
             (Icon::Insert, "source.insert", tl!("Insert (,)")),
@@ -718,6 +728,7 @@ fn transport(app: &mut FilmcraftApp, ui: &mut egui::Ui, row: Rect, which: Which)
             (Icon::GoToIn, "markers.goToIn", tl!("Go to In (Shift+I)")),
             (Icon::StepBack, "playhead.stepBack", tl!("Step Back 1 Frame (Left)")),
             (if app.playback.playing { Icon::Pause } else { Icon::Play }, "playback.toggle", tl!("Play-Stop Toggle (Space)")),
+            (Icon::Loop, "playback.loop", tl!("Loop")),
             (Icon::StepFwd, "playhead.stepForward", tl!("Step Forward 1 Frame (Right)")),
             (Icon::GoToOut, "markers.goToOut", tl!("Go to Out (Shift+O)")),
             (Icon::Lift, "sequence.lift", tl!("Lift (;)")),
@@ -726,12 +737,13 @@ fn transport(app: &mut FilmcraftApp, ui: &mut egui::Ui, row: Rect, which: Which)
             (Icon::Proxy, "media.toggleProxies", tl!("Toggle Proxies")),
         ]
     };
+    let visible_buttons: Vec<_> = buttons.iter().copied().filter(|(_, command, _)| transport_button_visible(monitor_view::view(app, which), command)).collect();
     let bw = 30.0;
-    let total = buttons.len() as f32 * bw;
+    let total = visible_buttons.len() as f32 * bw;
     let mut x = row.center().x - total / 2.0;
     let ctx = ui.ctx().clone();
     let prefix = if src { "source" } else { "program" };
-    for (icon, cmd, tip) in buttons {
+    for (icon, cmd, tip) in visible_buttons {
         let r = Rect::from_min_size(pos2(x, row.min.y + 2.0), vec2(bw - 2.0, 26.0));
         let resp = ui.interact(r, egui::Id::new((prefix, cmd)), Sense::click()).on_hover_text(tip);
         app.auto.add(&format!("{prefix}.transport.{cmd}"), r, tip);
@@ -740,7 +752,11 @@ fn transport(app: &mut FilmcraftApp, ui: &mut egui::Ui, row: Rect, which: Which)
             ui.painter().rect_filled(r, 4.0, t.hover);
         }
         let sz = if is_play { 16.0 } else { 14.0 };
-        let on = cmd == "media.toggleProxies" && app.session.media.use_proxies();
+        let on = match cmd {
+            "media.toggleProxies" => app.session.media.use_proxies(),
+            "playback.loop" => if src { app.source_playback.clock.looping } else { app.playback.looping },
+            _ => false,
+        };
         let col = if on {
             t.accent
         } else if resp.hovered() {
@@ -771,6 +787,34 @@ fn transport(app: &mut FilmcraftApp, ui: &mut egui::Ui, row: Rect, which: Which)
     let r = Rect::from_min_size(pos2(row.max.x - 30.0, row.min.y + 4.0), vec2(22.0, 22.0));
     let resp = ui.interact(r, egui::Id::new((prefix, "btn-editor")), Sense::click()).on_hover_text(tl!("Button Editor"));
     icons::paint(ui.painter(), r.shrink(5.0), Icon::Plus, if resp.hovered() { t.tab_text_active } else { t.text_dim });
+    app.auto.add(&format!("{prefix}.buttonEditor"), r, "Button Editor");
+    egui::Popup::menu(&resp).show(|ui| {
+        ui.set_min_width(240.0);
+        for (_, cmd, tip) in &buttons {
+            let mut shown = transport_button_visible(monitor_view::view(app, which), cmd);
+            let response = ui.checkbox(&mut shown, *tip);
+            app.auto.add(&format!("{prefix}.buttonEditor.{cmd}"), response.rect, tip);
+            if response.changed() {
+                let view = monitor_view::view_mut(app, which);
+                if *cmd == "playback.loop" {
+                    view.show_loop_button = shown;
+                } else if shown {
+                    view.hidden_transport_buttons.retain(|hidden| hidden != cmd);
+                } else if !view.hidden_transport_buttons.iter().any(|hidden| hidden == cmd) {
+                    view.hidden_transport_buttons.push((*cmd).to_string());
+                }
+            }
+        }
+        ui.separator();
+        let reset = ui.button(tl!("Reset"));
+        app.auto.add(&format!("{prefix}.buttonEditor.reset"), reset.rect, "Reset");
+        if reset.clicked() {
+            let view = monitor_view::view_mut(app, which);
+            view.hidden_transport_buttons.clear();
+            view.show_loop_button = false;
+            ui.close();
+        }
+    });
 }
 
 fn source_nav(app: &mut FilmcraftApp, cmd: &str) {
@@ -795,6 +839,34 @@ mod tests {
 
     fn flat(w: usize, h: usize, rgba: [u8; 4]) -> Rgba {
         Rgba { w, h, px: rgba.iter().copied().cycle().take(w * h * 4).collect() }
+    }
+
+    #[test]
+    fn button_editor_visibility_is_independent_and_survives_serialization() {
+        let mut program = MonitorView::default();
+        let source = MonitorView::default();
+        assert!(transport_button_visible(&program, "markers.add"), "existing buttons stay visible");
+        assert!(!transport_button_visible(&program, "playback.loop"), "optional Loop starts hidden");
+
+        program.hidden_transport_buttons.push("markers.add".into());
+        program.show_loop_button = true;
+        assert!(!transport_button_visible(&program, "markers.add"));
+        assert!(transport_button_visible(&program, "playback.loop"));
+        assert!(transport_button_visible(&source, "markers.add"), "source configuration is independent");
+
+        let saved = serde_json::to_value(&program).unwrap();
+        let restored: MonitorView = serde_json::from_value(saved.clone()).unwrap();
+        assert!(!transport_button_visible(&restored, "markers.add"));
+        assert!(transport_button_visible(&restored, "playback.loop"));
+
+        // Layouts saved before the editor existed still use the original default controls.
+        let mut legacy = saved;
+        let object = legacy.as_object_mut().unwrap();
+        object.remove("hidden_transport_buttons");
+        object.remove("show_loop_button");
+        let restored: MonitorView = serde_json::from_value(legacy).unwrap();
+        assert!(transport_button_visible(&restored, "markers.add"));
+        assert!(!transport_button_visible(&restored, "playback.loop"));
     }
 
     #[test]

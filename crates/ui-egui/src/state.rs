@@ -277,6 +277,10 @@ pub struct MonitorView {
     pub pan: [f32; 2],
     pub safe_margins: bool,
     pub show_transport: bool,
+    /// Transport buttons hidden through the Source/Program Monitor Button Editor.
+    pub hidden_transport_buttons: Vec<String>,
+    /// Loop is an optional toolbar button, off by default as in the original toolbar.
+    pub show_loop_button: bool,
     /// Program monitor display mode Multi-Camera (angle grid + program).
     pub multicam: bool,
     pub display: DisplayMode,
@@ -300,6 +304,8 @@ impl Default for MonitorView {
             pan: [0.0, 0.0],
             safe_margins: false,
             show_transport: true,
+            hidden_transport_buttons: Vec::new(),
+            show_loop_button: false,
             multicam: false,
             display: DisplayMode::Composite,
             compare_ref: None,
