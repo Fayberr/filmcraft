@@ -698,7 +698,7 @@ fn transport_button_visible(view: &MonitorView, command: &str) -> bool {
     if command == "playback.loop" {
         return view.show_loop_button;
     }
-    !view.hidden_transport_buttons.iter().any(|hidden| hidden == command)
+    !view.hidden_transport_buttons.iter().any(|hidden| hidden.as_str() == command)
 }
 
 fn transport(app: &mut FilmcraftApp, ui: &mut egui::Ui, row: Rect, which: Which) {
@@ -799,8 +799,8 @@ fn transport(app: &mut FilmcraftApp, ui: &mut egui::Ui, row: Rect, which: Which)
                 if *cmd == "playback.loop" {
                     view.show_loop_button = shown;
                 } else if shown {
-                    view.hidden_transport_buttons.retain(|hidden| hidden != cmd);
-                } else if !view.hidden_transport_buttons.iter().any(|hidden| hidden == cmd) {
+                    view.hidden_transport_buttons.retain(|hidden| hidden.as_str() != *cmd);
+                } else if !view.hidden_transport_buttons.iter().any(|hidden| hidden.as_str() == *cmd) {
                     view.hidden_transport_buttons.push((*cmd).to_string());
                 }
             }
